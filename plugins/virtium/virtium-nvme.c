@@ -128,11 +128,15 @@ static void vt_convert_smart_data_to_human_readable_format(struct vtview_smart_l
     char tempbuff[1024] = "";
     int i;
     int temperature = ((smart->raw_smart.temperature[1] << 8) | smart->raw_smart.temperature[0]) - 273;
+    double capacity;
+
+    long long int lba = 1 << smart->raw_ns.lbaf[(smart->raw_ns.flbas & 0x0f)].ds;
+    capacity = le64_to_cpu(smart->raw_ns.nsze) * lba;
 
     snprintf(tempbuff, sizeof(tempbuff), "log;%s;%lu;%s;%s;%-.*s;", smart->raw_ctrl.sn, smart->time_stamp, smart->path, \
             smart->raw_ctrl.mn, (int)sizeof(smart->raw_ctrl.fr), smart->raw_ctrl.fr);
     strcpy(text, tempbuff);
-    snprintf(tempbuff, sizeof(tempbuff), "Capacity;%f;", (double)smart->raw_ns.nsze / 1000000000);
+    snprintf(tempbuff, sizeof(tempbuff), "Capacity;%lf;", capacity / 1000000000);
     strcat(text, tempbuff);
     snprintf(tempbuff, sizeof(tempbuff), "Critical_Warning;%u;", smart->raw_smart.critical_warning);
     strcat(text, tempbuff);
@@ -377,6 +381,149 @@ static int vt_update_vtview_log_header(const int fd, const char *path, const str
     return (ret);
 }
 
+static void vt_build_power_state_descriptor(const struct nvme_id_ctrl *ctrl)
+{
+    unsigned int i;
+    unsigned char *buf;
+
+    printf("{\n");
+    printf("\"Power State Descriptors\":{\n");
+    printf("    \"NOPS\":\"Non-Operational State,\"\n");
+    printf("    \"MPS\":\"Max Power Scale (0: in 0.01 Watts; 1: in 0.0001 Watts),\"\n");
+    printf("    \"ENLAT\":\"Entry Latency in microseconds,\"\n");
+    printf("    \"RWL\":\"Relative Write Latency,\"\n");
+    printf("    \"RRL\":\"Relative Read Latency,\"\n");
+    printf("    \"IPS\":\"Idle Power Scale (00b: Not reported; 01b: 0.0001 W; 10b: 0.01 W; 11b: Reserved),\"\n");
+    printf("    \"APS\":\"Active Power Scale (00b: Not reported; 01b: 0.0001 W; 10b: 0.01 W; 11b: Reserved),\"\n");
+    printf("    \"ACTP\":\"Active Power,\"\n");
+    printf("    \"MP\":\"Maximum Power,\"\n");
+    printf("    \"EXLAT\":\"Exit Latency in microseconds,\"\n");
+    printf("    \"RWT\":\"Relative Write Throughput,\"\n");
+    printf("    \"RRT\":\"Relative Read Throughput,\"\n");
+    printf("    \"IDLP\":\"Idle Power,\"\n");
+    printf("    \"APW\":\"Active Power Workload,\"\n");
+    printf("    \"Ofs\":\"BYTE Offset,\"\n");
+
+    printf("    \"Power State Descriptors Details\":\"\n");
+
+    printf("%6s%10s%5s%4s%6s%10s%10s%10s%4s%4s%4s%4s%10s%4s%6s%10s%4s%5s%6s\n", "Entry", "0fs 00-03", "NOPS", "MPS", "MP", "ENLAT", "EXLAT", "0fs 12-15",\
+            "RWL", "RWT", "RRL", "RRT", "0fs 16-19", "IPS", "IDLP", "0fs 20-23", "APS", "APW", "ACTP");
+
+
+    printf("%6s%10s%5s%4s%6s%10s%10s%10s%4s%4s%4s%4s%10s%4s%6s%10s%4s%5s%6s\n", "=====", "=========", "====", "===", "=====", "=========", "=========",\
+            "=========", "===", "===", "===", "===", "=========", "===", "=====", "=========", "===", "====", "=====");
+
+    for(i = 0; i < 32; i++)
+    {
+        char s[100];
+        unsigned int temp;
+        
+        printf("%6d", i);
+        buf = (unsigned char*) (&ctrl->psd[i]);
+        vt_convert_data_buffer_to_hex_string(&buf[0], 4, true, s);
+        printf("%9sh", s);
+
+        temp = ctrl->psd[i].flags;
+        printf("%4ub", ((unsigned char)temp & 0x02));
+        printf("%3ub", ((unsigned char)temp & 0x01));
+        vt_convert_data_buffer_to_hex_string(&buf[0], 2, true, s);
+        printf("%5sh", s);
+
+        vt_convert_data_buffer_to_hex_string(&buf[4], 4, true, s);
+        printf("%9sh", s);
+        vt_convert_data_buffer_to_hex_string(&buf[8], 4, true, s);
+        printf("%9sh", s);
+        vt_convert_data_buffer_to_hex_string(&buf[12], 4, true, s);
+        printf("%9sh", s);
+        vt_convert_data_buffer_to_hex_string(&buf[15], 1, true, s);
+        printf("%3sh", s);
+        vt_convert_data_buffer_to_hex_string(&buf[14], 1, true, s);
+        printf("%3sh", s);
+        vt_convert_data_buffer_to_hex_string(&buf[13], 1, true, s);
+        printf("%3sh", s);
+        vt_convert_data_buffer_to_hex_string(&buf[12], 1, true, s);
+        printf("%3sh", s);
+        vt_convert_data_buffer_to_hex_string(&buf[16], 4, true, s);
+        printf("%9sh", s);
+        
+        temp = ctrl->psd[i].idle_scale;
+        snprintf(s, sizeof(s), "%u%ub", (((unsigned char)temp >> 6) & 0x01), (((unsigned char)temp >> 7) & 0x01));
+        printf("%3sb", s);
+
+        vt_convert_data_buffer_to_hex_string(&buf[16], 2, true, s);
+        printf("%5sh", s);
+        vt_convert_data_buffer_to_hex_string(&buf[20], 4, true, s);
+        printf("%9sh", s);
+
+        temp = ctrl->psd[i].active_work_scale;
+        snprintf(s, sizeof(s), "%u%ub", (((unsigned char)temp >> 6) & 0x01), (((unsigned char)temp >> 7) & 0x01));
+        printf("%3sb", s);
+        snprintf(s, sizeof(s), "%u%u%ub", (((unsigned char)temp) & 0x01), (((unsigned char)temp >> 1) & 0x01), (((unsigned char)temp >> 2) & 0x01));
+        printf("%4sb", s);
+
+        vt_convert_data_buffer_to_hex_string(&buf[20], 2, true, s);
+        printf("%5sh", s);
+        printf("\n");
+    }
+
+    printf("    \"}\n}\n");
+
+}
+
+static void vt_dump_hex_data(const unsigned char *pbuff, size_t pbuffsize) {
+
+    char textbuf[33];
+    unsigned long int i, j;
+
+    textbuf[32] = '\0';
+    printf("[%08X] ", 0);
+    for (i = 0; i < pbuffsize; i++) 
+    {
+        printf("%02X ", pbuff[i]);
+
+        if (pbuff[i] >= ' ' && pbuff[i] <= '~') 
+        {
+            textbuf[i % 32] = pbuff[i];
+        }
+        else 
+        {
+            textbuf[i % 32] = '.';
+        }
+
+        if ((((i + 1) % 8) == 0) || ((i + 1) == pbuffsize))
+        {
+            printf(" ");
+            if ((i + 1) % 32 == 0) 
+            {
+                printf(" %s\n", textbuf);
+                if((i + 1) != pbuffsize)
+                {
+                    printf("[%08lX] ", (i + 1));
+                }
+            } 
+            else if (i + 1 == pbuffsize) 
+            {
+                textbuf[(i + 1) % 32] = '\0';
+                if(((i + 1) % 8) == 0)
+                {
+                    printf(" ");
+                }
+
+                for (j = ((i + 1) % 32); j < 32; j++) 
+                {
+                    printf("   ");
+                    if(((j + 1) % 8) == 0)
+                    {
+                        printf(" ");
+                    }
+                }
+
+                printf("%s\n", textbuf);
+            }
+        }
+    }
+}
+
 void vt_build_identify_lv2(unsigned int data, unsigned int start, unsigned int count, const char **table, bool isEnd)
 {
     unsigned int i, end, pos, sh = 1;
@@ -420,7 +567,9 @@ static void vt_parse_detail_identify(const struct nvme_id_ctrl *ctrl)
                                  "0 = the controller is associated with a PCI Function or a Fabrics connection", \
                                  "1 = the controller is associated with an SR-IOV Virtual Function"};
 
-    const char *OAEStable[18] = {"Reversed", \
+    const char *OAEStable[20] = {"Reserved", \
+                                 "Reserved", \
+                                 "Reserved", \
                                  "Reserved", \
                                  "Reserved", \
                                  "Reserved", \
@@ -436,7 +585,7 @@ static void vt_parse_detail_identify(const struct nvme_id_ctrl *ctrl)
                                  "Reserved", \
                                  "0 = does not support sending the Namespace Attribute Notices event nor the associated Changed Namespace List log page", \
                                  "1 = supports sending the Namespace Attribute Notices  & the associated Changed Namespace List log page", \
-                                 "0 = does not support sending sending Firmware Activation Notices event", \
+                                 "0 = does not support sending Firmware Activation Notices event", \
                                  "1 = supports sending Firmware Activation Notices"};
 
     const char *CTRATTtable[4] =  {"0 = does not support a 128-bit Host Identifier", \
@@ -601,7 +750,7 @@ static void vt_parse_detail_identify(const struct nvme_id_ctrl *ctrl)
     printf("    \"Controller Multi-Path I/O and Namespace Sharing Capabilities\":{\n");
     vt_convert_data_buffer_to_hex_string(&buf[76], 1, true, s);
     printf("        \"Value\":\"%sh\",\n", s);
-    vt_build_identify_lv2(temp, 0, 2, CMICtable, true);
+    vt_build_identify_lv2(temp, 0, 3, CMICtable, true);
 
     vt_convert_data_buffer_to_hex_string(&buf[77], 1, true, s);
     printf("    \"Maximum Data Transfer Size\":\"%sh\",\n", s);
@@ -759,7 +908,7 @@ static void vt_parse_detail_identify(const struct nvme_id_ctrl *ctrl)
     vt_build_identify_lv2(temp, 0, 7, ONCStable, true);
 
     temp = le16_to_cpu(ctrl->fuses);
-    printf("    \"Optional NVM Command Support\":{\n");
+    printf("    \"Fused Operation Support\":{\n");
     vt_convert_data_buffer_to_hex_string(&buf[522], 2, true, s);
     printf("        \"Value\":\"%sh\",\n", s);
     vt_build_identify_lv2(temp, 0, 1, FUSEStable, true);
@@ -782,7 +931,7 @@ static void vt_parse_detail_identify(const struct nvme_id_ctrl *ctrl)
     printf("    \"Atomic Write Unit Power Fail\":\"%sh\",\n", s);
 
     temp = ctrl->nvscc;
-    printf("    \"VNVM Vendor Specific Command Configuration\":{\n");
+    printf("    \"NVM Vendor Specific Command Configuration\":{\n");
     vt_convert_data_buffer_to_hex_string(&buf[530], 1, true, s);
     printf("        \"Value\":\"%sh\",\n", s);
     vt_build_identify_lv2(temp, 0, 1, NVSCCtable, true);
@@ -801,7 +950,15 @@ static void vt_parse_detail_identify(const struct nvme_id_ctrl *ctrl)
 
     vt_convert_data_buffer_to_hex_string(&buf[768], 256, false, s);
     printf("    \"NVM Subsystem NVMe Qualified Name\":\"%s\",\n", s);
-    printf("}\n");
+    printf("}\n\n");
+
+    vt_build_power_state_descriptor(ctrl);
+    
+    
+    printf("\n{\n");
+    printf("\"Vendor Specific\":\"\n");
+    vt_dump_hex_data(&buf[3072], 1024);
+    printf("\"}\n");
 }
 
 static int vt_save_smart_to_vtview_log(int argc, char **argv, struct command *cmd, struct plugin *plugin)
@@ -832,7 +989,7 @@ Just logging :\n\
     struct vtview_save_log_settings cfg = \
     {
         .run_time_hrs = 20,
-        .log_record_frequency_hrs = 0.25,
+        .log_record_frequency_hrs = 10,
         .output_file = NULL,
         .test_name = NULL,
     };
@@ -848,6 +1005,11 @@ Just logging :\n\
 
     vt_generate_vtview_log_file_name(vt_default_log_file_name);
 
+    if(argc >= 2)
+    {
+        strcpy(path, argv[1]);
+    }
+
     fd = parse_and_open(argc, argv, desc, command_line_options, &cfg, sizeof(cfg));
     if (fd < 0) 
     {
@@ -855,9 +1017,6 @@ Just logging :\n\
 		
         return (fd);
     }
-
-    printf("argc: %d\n", argc);
-    strcpy(path, argv[1]);
 
     printf("Running...\n");
     printf("Collecting data for device %s\n", path);
