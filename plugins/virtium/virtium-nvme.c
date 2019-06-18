@@ -129,6 +129,18 @@ static void vt_convert_smart_data_to_human_readable_format(struct vtview_smart_l
     int i;
     int temperature = ((smart->raw_smart.temperature[1] << 8) | smart->raw_smart.temperature[0]) - 273;
     double capacity;
+    char *curlocale;
+    char *templocale;
+
+    curlocale = setlocale(LC_ALL, NULL);
+    templocale = strdup(curlocale);
+    if(NULL == templocale)
+    {
+        printf("Cannot malloc buffer\n");
+    }
+
+    // temporary change the locale to C enveronment
+    setlocale(LC_ALL, "C");
 
     long long int lba = 1 << smart->raw_ns.lbaf[(smart->raw_ns.flbas & 0x0f)].ds;
     capacity = le64_to_cpu(smart->raw_ns.nsze) * lba;
@@ -197,6 +209,10 @@ static void vt_convert_smart_data_to_human_readable_format(struct vtview_smart_l
 
     snprintf(tempbuff, sizeof(tempbuff), "Reversed_1;%d;\n", 0);
     strcat(text, tempbuff);
+
+    // set back to original locale
+    setlocale(LC_ALL, templocale);
+    free(templocale);
 }
 
 static void vt_header_to_string(const struct vtview_log_header *header, char *text)
@@ -447,7 +463,7 @@ static void vt_build_power_state_descriptor(const struct nvme_id_ctrl *ctrl)
         printf("%9sh", s);
         
         temp = ctrl->psd[i].idle_scale;
-        snprintf(s, sizeof(s), "%u%ub", (((unsigned char)temp >> 6) & 0x01), (((unsigned char)temp >> 7) & 0x01));
+        snprintf(s, sizeof(s), "%u%u", (((unsigned char)temp >> 6) & 0x01), (((unsigned char)temp >> 7) & 0x01));
         printf("%3sb", s);
 
         vt_convert_data_buffer_to_hex_string(&buf[16], 2, true, s);
@@ -456,9 +472,9 @@ static void vt_build_power_state_descriptor(const struct nvme_id_ctrl *ctrl)
         printf("%9sh", s);
 
         temp = ctrl->psd[i].active_work_scale;
-        snprintf(s, sizeof(s), "%u%ub", (((unsigned char)temp >> 6) & 0x01), (((unsigned char)temp >> 7) & 0x01));
+        snprintf(s, sizeof(s), "%u%u", (((unsigned char)temp >> 6) & 0x01), (((unsigned char)temp >> 7) & 0x01));
         printf("%3sb", s);
-        snprintf(s, sizeof(s), "%u%u%ub", (((unsigned char)temp) & 0x01), (((unsigned char)temp >> 1) & 0x01), (((unsigned char)temp >> 2) & 0x01));
+        snprintf(s, sizeof(s), "%u%u%u", (((unsigned char)temp) & 0x01), (((unsigned char)temp >> 1) & 0x01), (((unsigned char)temp >> 2) & 0x01));
         printf("%4sb", s);
 
         vt_convert_data_buffer_to_hex_string(&buf[20], 2, true, s);
